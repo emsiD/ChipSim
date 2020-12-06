@@ -22,7 +22,7 @@ const int ROK = 365 * DEN;
 const int POCET_ZAMESTNANCU = 3;
 
 // Simulační doba představuje délku simulace v simulačním čase.
-const double SIMULACNI_DOBA = 1 * ROK;
+const double SIMULACNI_DOBA = 1 * DEN;
 
 // zariadenia
 Facility f_peeler;
@@ -41,66 +41,120 @@ bool je_den = false;
 int pocet_pracujicich_zamestnancu = 0;
 
 int pocet_in_brambor = 0;
-int pocet_out_brambor = 0;
+float pocet_out_brambor = 0.0;
+float pocet_out_odpad = 0.0;
+
+class SUROVY_KUS : public Process {
+
+  void Behavior() {
+    q_surove_kusy.Insert(this);  // přidej do fronty čekajících surových kusů
+
+    Passivate();
+
+    Cancel();  // transakce se ukončí
+  }
+
+ public:
+
+  SUROVY_KUS() { 
+
+  	Activate(); 
+  }
+};
 
 class OneKGofPotatoes : public Process {
 
 
 	void Behavior() {
 
-		pocet_in_brambor++;
+		if(je_den) {
 
-		float multiplier = 1.0;
-		
-		//peeling
-		Seize(f_peeler);
-		Wait (4*MINUTA);
-		Release(f_peeler);
+			float multiplier = 1.0;
+			float odpad = 0;
+			int zemiaky = 0;
 
-		//inspection
-		Wait (4*MINUTA);
+			while (q_surove_kusy.Length() < 4) {
+				Wait (1);
+			}
 
-		// 10% odpad
-		multiplier = multiplier * 0.9;
+			zemiaky += q_surove_kusy.Length();
+			multiplier *= q_surove_kusy.Length();
+			q_surove_kusy.clear();
+			
+			//peeling
+			Seize(f_peeler);
+			Wait (4*MINUTA);
+			Release(f_peeler);
 
-		//slicer
-		Seize(f_slicer);
-		Wait (4*MINUTA);
-		Release(f_slicer);
+			(new OneKGofPotatoes) -> Activate();
 
-		//washing
-		Seize(f_washer);
-		Wait (4*MINUTA);
-		Release(f_washer);
+			// 15% odpad - supka
+			odpad += multiplier;
+			multiplier *= Uniform(0.80,0.90);
+			odpad -= multiplier;
 
-		//cooking
-		Seize(f_boiler[1]);
-		Wait (8*MINUTA);
-		Release(f_boiler[1]);
+			//inspection
+			Wait (4*MINUTA);
 
-		// 60% sa odpari
-		multiplier = multiplier * 0.4;
+			// 10% odpad
+			odpad += multiplier;
+			multiplier *= Uniform(0.85,1);
+			odpad -= multiplier;
 
-		// drainage belt
-		Wait (5*MINUTA);
+			//slicer
+			Seize(f_slicer);
+			Wait (4*MINUTA);
+			Release(f_slicer);
 
-		// inspection
-		Wait (5*MINUTA);
+			//washing
+			Seize(f_washer);
+			Wait (4*MINUTA);
+			Release(f_washer);
 
-		// 10% odpad
-		multiplier = multiplier * 0.9;
-		
-		// vyrobene chipsy udane v percentach z kila
-		pocet_out_brambor = multiplier;
+			//cooking
+			if (!f_boiler[1].Busy()) {
+				Seize(f_boiler[1]);
+				Wait (8*MINUTA);
+				Release(f_boiler[1]);
+			} else {
+				Seize(f_boiler[0]);
+				Wait (8*MINUTA);
+				Release(f_boiler[0]);
+			}
+			// 60% sa odpari
+			multiplier *= Uniform(0.35,0.45);
 
-		// debug
-		unsigned long long t = Time;
-      	cout << setw(3) << (int)t / ROK << "r, " << setw(3)
-           << (int)(t % ROK) / DEN << "d,  " << setw(2)
-           << (int)(t % DEN) / HODINA << ":" << setw(2)
-           << (int)(t % HODINA) / MINUTA << ":" << setw(2) << (t % MINUTA)
-           << (" -- vyrobene kg = " + to_string(multiplier))
-           << endl;
+			// drainage belt
+			Wait (5*MINUTA);
+
+			// inspection
+			Wait (5*MINUTA);
+
+			// 10% odpad
+			odpad += multiplier;
+			multiplier *= Uniform(0.85,1);
+			odpad -= multiplier;
+			
+			// vyrobene chipsy udane v percentach z kila
+			pocet_out_brambor += multiplier;
+
+			pocet_out_odpad += odpad;
+
+			pocet_in_brambor += zemiaky;
+
+			// debug
+			unsigned long long t = Time;
+	      	cout << setw(3) << (int)t / ROK << "r, " << setw(3)
+	        	<< (int)(t % ROK) / DEN << "d,  " << setw(2)
+	            << (int)(t % DEN) / HODINA << ":" << setw(2)
+	            << (int)(t % HODINA) / MINUTA << ":" << setw(2) << (t % MINUTA)
+	            << (" | spotrebovane kg: " + to_string(pocet_in_brambor))
+	            << (" | vyrobene kg: " + to_string(pocet_out_brambor))
+	            << (" | odpad kg: " + to_string(pocet_out_odpad))
+	            << " |" << endl;
+
+	    }
+	Passivate();
 	}
 
 };
@@ -114,12 +168,10 @@ class Gen_Brambor : public Event {
 	void Behavior() {
 
 		if(je_den) {
-			(new OneKGofPotatoes)->Activate();
+			(new SUROVY_KUS)->Activate();
 			vygen_brambor++;
-
-			Activate(Time + Uniform(1, 3));
+			Activate(Time + Uniform(1 * MINUTA, 2 * MINUTA));
 		}
-		//printf("%d - vygen_brambor\n", vygen_brambor);
 	}
 
 	public:
@@ -138,16 +190,16 @@ class GEN_DEN : public Event {
 
 		if(je_den) {
 			je_den = false;
-			printf("%d - vygen_brambor\n", pocet_in_brambor);
-			printf("**************** noc *******************\n");
-			Activate(Time + (8*HODINA));
+			cout << " ******************************************** " << je_den << " ******************************************** " << endl;
+			Activate(Time + (16*HODINA));
 
 		//* spustenie generatoru brambor ak zacne den
 		} else {
 			je_den = true;
-			printf("**************** den *******************\n");
+			cout << " ******************************************** " << je_den << " ******************************************** " << endl;
 			(new Gen_Brambor())->Activate();
-			Activate(Time + (16*HODINA));
+
+			Activate(Time + (8*HODINA));
 		}
 	}
 };
@@ -158,9 +210,7 @@ class GEN_ZAMESTNANCU : public Event {
     for (int i = 0; i < POCET_ZAMESTNANCU; i++) {
       // Vygenerované zaměstnance umístíme do fronty zaměstnanců.%
       //q_zamestnanci.Insert(this);
-      printf(" +1 zamestnanec\n");
     }
-    printf("%d - zamestnanci\n", q_zamestnanci.Length());
   }
 };
 
@@ -188,11 +238,10 @@ int main(int argc, char **argv) {
 	// Aktivace dne.
 	(new GEN_DEN)->Activate();
 
+	(new OneKGofPotatoes) -> Activate();
+
 	// Generuj zaměstnance.
 	//(new GEN_ZAMESTNANCU)->Activate();
-
-	// Aktivace periodického generování surových kusů.
-	(new Gen_Brambor)->Activate();
 
 	// Start simulace.
 	Run();
