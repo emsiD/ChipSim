@@ -1,7 +1,7 @@
 /*
- * @file firmaHridele.cpp
- * @author Jan Kotas<xkotas07@stud.fit.vutbr.cz>
- * @author Matúš Burzala<xburza00@stud.fit.vutbr.cz>
+ * @file firma.cpp
+ * @author xpolic05
+ * @author xdubec00
  */
 
 #include <iostream>
@@ -9,20 +9,21 @@
 #include <string>
 #include <iomanip>
 #include "simlib.h"
+#include <cstring>
 
 using namespace std;
 
-// Důležité konstanty pro efektivnejsi práci s časem a pro lepší abstrakci.
+// Konštanty
 const int MINUTA = 60;
 const int HODINA = 60 * MINUTA;
 const int DEN = 24 * HODINA;
 const int ROK = 365 * DEN;
 
-//* pocet zamestnancov
+// počet zamestnancov
 const int POCET_ZAMESTNANCU = 3;
 
-// Simulační doba představuje délku simulace v simulačním čase.
-const double SIMULACNI_DOBA = 3 * DEN;
+// Simulačná doba v simulačnom čase
+double DOBA_SIMULACIE = 1 * DEN;
 
 // zariadenia
 Facility f_peeler;
@@ -33,7 +34,7 @@ Facility f_boiler[2];
 // queue pre surove brambory
 Queue q_surove_kusy;
 
-//stridani dne a noci
+// je smena alebo nie?
 bool je_den = false;
 
 int pocet_pracujicich_zamestnancu = 0;
@@ -45,11 +46,12 @@ float pocet_out_odpad = 0.0;
 class SUROVY_KUS : public Process {
 
   void Behavior() {
-    q_surove_kusy.Insert(this);  // přidej do fronty čekajících surových kusů
-
+  	// pridá do fronty tento process
+    q_surove_kusy.Insert(this);
+    // stopnutie transakcie
     Passivate();
-
-    Cancel();  // transakce se ukončí
+    // ukončenie transakcie
+    Cancel();
   }
 
  public:
@@ -60,8 +62,8 @@ class SUROVY_KUS : public Process {
   }
 };
 
-class OneKGofPotatoes : public Process {
-
+// Proces výroby
+class ProcesVyroby : public Process {
 
 	void Behavior() {
 
@@ -69,10 +71,12 @@ class OneKGofPotatoes : public Process {
 			float odpad = 0;
 			int zemiaky = 0;
 
+			// ak je aspon 4kg vo fronte tak sa vyprázdni a začína výroba
 			while (q_surove_kusy.Length() < 4) {
 				Wait (1);
 			}
 
+			// zistí koľko kilo berie
 			zemiaky += q_surove_kusy.Length();
 			multiplier *= q_surove_kusy.Length();
 			q_surove_kusy.clear();
@@ -81,8 +85,6 @@ class OneKGofPotatoes : public Process {
 			Seize(f_peeler);
 			Wait (4*MINUTA);
 			Release(f_peeler);
-
-			//(new OneKGofPotatoes) -> Activate();
 
 			// 15% odpad - supka
 			odpad += multiplier;
@@ -107,6 +109,12 @@ class OneKGofPotatoes : public Process {
 			Wait (4*MINUTA);
 			Release(f_washer);
 
+			// drainage belt
+			Wait (5*MINUTA);
+
+			// 60% sa odpari
+			multiplier *= Uniform(0.35,0.45);
+
 			//cooking
 			if (!f_boiler[1].Busy()) {
 				Seize(f_boiler[1]);
@@ -117,19 +125,19 @@ class OneKGofPotatoes : public Process {
 				Wait (8*MINUTA);
 				Release(f_boiler[0]);
 			}
-			// 60% sa odpari
-			multiplier *= Uniform(0.35,0.45);
-
-			// drainage belt
-			Wait (5*MINUTA);
 
 			// inspection
-			Wait (5*MINUTA);
+			Wait (5 * MINUTA);
 
 			// 10% odpad
 			odpad += multiplier;
 			multiplier *= Uniform(0.85,1);
 			odpad -= multiplier;
+
+			// packing
+			Wait (1*MINUTA);
+
+			// FINISHED PRODUCTS ***************************************************
 			
 			// vyrobene chipsy udane v percentach z kila
 			pocet_out_brambor += multiplier;
@@ -138,7 +146,7 @@ class OneKGofPotatoes : public Process {
 
 			pocet_in_brambor += zemiaky;
 
-			// debug
+			// výpis
 			unsigned long long t = Time;
 	      	cout << setw(3) << (int)t / ROK << "r, " << setw(3)
 	        	<< (int)(t % ROK) / DEN << "d,  " << setw(2)
@@ -152,10 +160,10 @@ class OneKGofPotatoes : public Process {
 
 };
 
-//* generator brambor pre jeden den
+// generátor zemiakov pre jeden deň
 class Gen_Brambor : public Event {
 
-	//* vygenerovanych brambor za den
+	// vygenerované zemiaky za deň
 	int vygen_brambor;
 
 	void Behavior() {
@@ -163,7 +171,7 @@ class Gen_Brambor : public Event {
 		if(je_den) {
 			(new SUROVY_KUS)->Activate();
 			vygen_brambor++;
-			Activate(Time + Uniform(1 * MINUTA, 2 * MINUTA));
+			Activate(Time + Uniform(1 , 1 * MINUTA));
 		}
 	}
 
@@ -176,16 +184,16 @@ class Gen_Brambor : public Event {
 		}
 };
 
-//* generator brambor pre jeden den
+// Posúva linku každé 4 minúty
 class Posun_Linky : public Event {
 
-	//* vygenerovanych brambor za den
+	// pocet posunov za deň
 	int pocet_iteracii;
 
 	void Behavior() {
 
 		if(je_den) {
-			(new OneKGofPotatoes)->Activate();
+			(new ProcesVyroby)->Activate();
 			pocet_iteracii++;
 			Activate(Time + (4 * MINUTA));
 		}
@@ -200,7 +208,7 @@ class Posun_Linky : public Event {
 		}
 };
 
-//* striedanie dna a noci
+// striedanie smien
 class GEN_DEN : public Event {
 
 	void Behavior() {
@@ -209,7 +217,7 @@ class GEN_DEN : public Event {
 			je_den = false;
 			Activate(Time + (17*HODINA));
 
-		//* spustenie generatoru brambor ak zacne den
+		// spustenie generatoru brambor ak zacne den
 		} else {
 			je_den = true;
 			(new Gen_Brambor())->Activate();
@@ -221,14 +229,35 @@ class GEN_DEN : public Event {
 };
 
 /*
- * Řídící funkce main. Nastavuje a aktivuje simulaci.
+ * Riadiaca funkcia main. Nastavuje a riadi simuláciu.
 */
 int main(int argc, char **argv) {
 
 	RandomSeed(time(NULL));
 
-	// Inicializace experimentu.
-	Init(0, SIMULACNI_DOBA);
+
+	if (argc == 3) {
+		try {
+			cout << "try " << atof(argv[1]) << " : " << argv[2] << endl;
+			if (strcmp(argv[2],"DEN") == 0)
+				cout << "here" << endl;
+				DOBA_SIMULACIE = atof(argv[1]) * DEN;
+			if (strcmp(argv[2],"MINUTA") == 0)
+				DOBA_SIMULACIE = atof(argv[1]) * MINUTA;
+			if (strcmp(argv[2],"HODINA") == 0)
+				DOBA_SIMULACIE = atof(argv[1]) * HODINA;
+		} catch (int e) {}
+	}
+	if (argc == 2 || argc > 3) {
+		cout << "/=================================| HELP |=================================\\" << endl
+			 << "|" << "argumenty: ./firma (double) (DEN/HODINA/MINUTA)                           |" << endl             
+			 << "|" << "Zadane cislo v prvom argumente udava pocet v jednotke z druheho argumentu.|" << endl
+			 << "****************************************************************************" << endl;
+		return 0;
+	}
+
+	// Inicializácia experimentu
+	Init(6*HODINA, DOBA_SIMULACIE + 6 * HODINA);
 
 	// Nastavenie nazvov strojov
 	f_peeler.SetName("Peeler");
@@ -241,11 +270,10 @@ int main(int argc, char **argv) {
 		f_boiler[i].SetName("Boiler");
 	}
 
-	// Aktivace dne.
+	// Aktivácia smeny.
 	(new GEN_DEN)->Activate();
 
-	// Start simulace.
+	// Štart simulácie
 	Run();
-
 } 
  
