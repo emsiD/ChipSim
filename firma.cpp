@@ -11,6 +11,8 @@
 #include "simlib.h"
 #include <cstring>
 
+//#define DEBUG
+
 using namespace std;
 
 // Konštanty
@@ -31,6 +33,10 @@ Facility f_slicer;
 Facility f_washer;
 Facility f_boiler[2];
 
+// statistika
+Stat efektivita;
+Stat odpadPercent;
+
 // queue pre surove brambory
 Queue q_surove_kusy;
 
@@ -42,6 +48,8 @@ int pocet_pracujicich_zamestnancu = 0;
 int pocet_in_brambor = 0;
 float pocet_out_brambor = 0.0;
 float pocet_out_odpad = 0.0;
+
+int ostrenie_nozov = 0;
 
 class SUROVY_KUS : public Process {
 
@@ -83,7 +91,7 @@ class ProcesVyroby : public Process {
 			
 			//peeling
 			Seize(f_peeler);
-			Wait (4*MINUTA);
+			Wait (3*MINUTA);
 			Release(f_peeler);
 
 			// 15% odpad - supka
@@ -92,37 +100,43 @@ class ProcesVyroby : public Process {
 			odpad -= multiplier;
 
 			//inspection
-			Wait (4*MINUTA);
+			Wait (3*MINUTA);
 
 			// 10% odpad
 			odpad += multiplier;
-			multiplier *= Uniform(0.85,1);
+			multiplier *= Uniform(0.90,1);
 			odpad -= multiplier;
+
+			// každú tonu zemiakov treba nabrúsiť nože na sliceri
+			if (ostrenie_nozov >= 1000){
+				Wait (1*MINUTA);
+				ostrenie_nozov = 0;
+			}
 
 			//slicer
 			Seize(f_slicer);
-			Wait (4*MINUTA);
+			Wait (3*MINUTA);
 			Release(f_slicer);
 
 			//washing
 			Seize(f_washer);
-			Wait (4*MINUTA);
+			Wait (3*MINUTA);
 			Release(f_washer);
 
 			// drainage belt
-			Wait (5*MINUTA);
+			Wait (3*MINUTA);
 
-			// 60% sa odpari
-			multiplier *= Uniform(0.35,0.45);
+			// 70% sa odpari
+			multiplier *= Uniform(0.26,0.36);
 
 			//cooking
 			if (!f_boiler[1].Busy()) {
 				Seize(f_boiler[1]);
-				Wait (8*MINUTA);
+				Wait (6*MINUTA);
 				Release(f_boiler[1]);
 			} else {
 				Seize(f_boiler[0]);
-				Wait (8*MINUTA);
+				Wait (6*MINUTA);
 				Release(f_boiler[0]);
 			}
 
@@ -131,7 +145,7 @@ class ProcesVyroby : public Process {
 
 			// 10% odpad
 			odpad += multiplier;
-			multiplier *= Uniform(0.85,1);
+			multiplier *= Uniform(0.90,1);
 			odpad -= multiplier;
 
 			// packing
@@ -146,18 +160,24 @@ class ProcesVyroby : public Process {
 
 			pocet_in_brambor += zemiaky;
 
-			// výpis
-			unsigned long long t = Time;
-	      	cout << setw(3) << (int)t / ROK << "r, " << setw(3)
-	        	<< (int)(t % ROK) / DEN << "d,  " << setw(2)
-	            << (int)(t % DEN) / HODINA << ":" << setw(2)
-	            << (int)(t % HODINA) / MINUTA << ":" << setw(2) << (t % MINUTA)
-	            << (" | spotrebovane kg: " + to_string(pocet_in_brambor))
-	            << (" | vyrobene kg: " + to_string(pocet_out_brambor))
-	            << (" | odpad kg: " + to_string(pocet_out_odpad))
-	            << " |" << endl;
-	}
+			ostrenie_nozov += zemiaky;
 
+			efektivita( (float) (multiplier / zemiaky) * 100 ); 
+
+			odpadPercent( (float) (odpad / zemiaky) * 100 ); 
+
+			// vypis ak je zapnuty debug
+			#ifdef DEBUG
+				unsigned long long t = Time;
+		      	cout << " " << (int)(t % ROK) / DEN << "dní,  " << setw(2)
+		             << (int)(t % DEN) / HODINA << ":" << setw(2)
+		             << (int)(t % HODINA) / MINUTA << ":" << setw(2) << (t % MINUTA)
+		             << (" | spotrebovane kg: " + to_string(pocet_in_brambor))
+		             << (" | vyrobene kg: " + to_string(pocet_out_brambor))
+		             << (" | odpad kg: " + to_string(pocet_out_odpad))
+		             << " |" << endl;
+		    #endif
+	}
 };
 
 // generátor zemiakov pre jeden deň
@@ -171,7 +191,7 @@ class Gen_Brambor : public Event {
 		if(je_den) {
 			(new SUROVY_KUS)->Activate();
 			vygen_brambor++;
-			Activate(Time + Uniform(1 , 1 * MINUTA));
+			Activate(Time + Uniform(1 , 6));
 		}
 	}
 
@@ -195,7 +215,7 @@ class Posun_Linky : public Event {
 		if(je_den) {
 			(new ProcesVyroby)->Activate();
 			pocet_iteracii++;
-			Activate(Time + (4 * MINUTA));
+			Activate(Time + (3 * MINUTA));
 		}
 	}
 
@@ -219,6 +239,8 @@ class GEN_DEN : public Event {
 
 		// spustenie generatoru brambor ak zacne den
 		} else {
+			ostrenie_nozov = 0;
+
 			je_den = true;
 			(new Gen_Brambor())->Activate();
 			(new Posun_Linky())->Activate();
@@ -235,12 +257,9 @@ int main(int argc, char **argv) {
 
 	RandomSeed(time(NULL));
 
-
 	if (argc == 3) {
 		try {
-			cout << "try " << atof(argv[1]) << " : " << argv[2] << endl;
 			if (strcmp(argv[2],"DEN") == 0)
-				cout << "here" << endl;
 				DOBA_SIMULACIE = atof(argv[1]) * DEN;
 			if (strcmp(argv[2],"MINUTA") == 0)
 				DOBA_SIMULACIE = atof(argv[1]) * MINUTA;
@@ -275,5 +294,12 @@ int main(int argc, char **argv) {
 
 	// Štart simulácie
 	Run();
+
+	// print statistik
+	cout << endl << "Percentualný výnos produktu zo suroviny:" << endl;
+	efektivita.Output();
+
+	cout << endl << "Percentualný výnos odpadu zo suroviny:" << endl;
+	odpadPercent.Output();
 } 
  
