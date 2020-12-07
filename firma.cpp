@@ -22,7 +22,7 @@ const int ROK = 365 * DEN;
 const int POCET_ZAMESTNANCU = 3;
 
 // Simulační doba představuje délku simulace v simulačním čase.
-const double SIMULACNI_DOBA = 1 * DEN;
+const double SIMULACNI_DOBA = 3 * DEN;
 
 // zariadenia
 Facility f_peeler;
@@ -30,8 +30,6 @@ Facility f_slicer;
 Facility f_washer;
 Facility f_boiler[2];
 
-// queue pre zamestnancov
-Queue q_zamestnanci;
 // queue pre surove brambory
 Queue q_surove_kusy;
 
@@ -67,8 +65,6 @@ class OneKGofPotatoes : public Process {
 
 	void Behavior() {
 
-		if(je_den) {
-
 			float multiplier = 1.0;
 			float odpad = 0;
 			int zemiaky = 0;
@@ -86,7 +82,7 @@ class OneKGofPotatoes : public Process {
 			Wait (4*MINUTA);
 			Release(f_peeler);
 
-			(new OneKGofPotatoes) -> Activate();
+			//(new OneKGofPotatoes) -> Activate();
 
 			// 15% odpad - supka
 			odpad += multiplier;
@@ -152,9 +148,6 @@ class OneKGofPotatoes : public Process {
 	            << (" | vyrobene kg: " + to_string(pocet_out_brambor))
 	            << (" | odpad kg: " + to_string(pocet_out_odpad))
 	            << " |" << endl;
-
-	    }
-	Passivate();
 	}
 
 };
@@ -183,6 +176,30 @@ class Gen_Brambor : public Event {
 		}
 };
 
+//* generator brambor pre jeden den
+class Posun_Linky : public Event {
+
+	//* vygenerovanych brambor za den
+	int pocet_iteracii;
+
+	void Behavior() {
+
+		if(je_den) {
+			(new OneKGofPotatoes)->Activate();
+			pocet_iteracii++;
+			Activate(Time + (4 * MINUTA));
+		}
+	}
+
+	public:
+		Posun_Linky(){
+
+			pocet_iteracii = 0;
+
+			Activate();
+		}
+};
+
 //* striedanie dna a noci
 class GEN_DEN : public Event {
 
@@ -190,28 +207,17 @@ class GEN_DEN : public Event {
 
 		if(je_den) {
 			je_den = false;
-			cout << " ******************************************** " << je_den << " ******************************************** " << endl;
-			Activate(Time + (16*HODINA));
+			Activate(Time + (17*HODINA));
 
 		//* spustenie generatoru brambor ak zacne den
 		} else {
 			je_den = true;
-			cout << " ******************************************** " << je_den << " ******************************************** " << endl;
 			(new Gen_Brambor())->Activate();
+			(new Posun_Linky())->Activate();
 
-			Activate(Time + (8*HODINA));
+			Activate(Time + (7*HODINA));
 		}
 	}
-};
-
-// Tato třída představuje událost, zajišťující generování zaměstnanců.
-class GEN_ZAMESTNANCU : public Event {
-  void Behavior() {
-    for (int i = 0; i < POCET_ZAMESTNANCU; i++) {
-      // Vygenerované zaměstnance umístíme do fronty zaměstnanců.%
-      //q_zamestnanci.Insert(this);
-    }
-  }
 };
 
 /*
@@ -237,11 +243,6 @@ int main(int argc, char **argv) {
 
 	// Aktivace dne.
 	(new GEN_DEN)->Activate();
-
-	(new OneKGofPotatoes) -> Activate();
-
-	// Generuj zaměstnance.
-	//(new GEN_ZAMESTNANCU)->Activate();
 
 	// Start simulace.
 	Run();
